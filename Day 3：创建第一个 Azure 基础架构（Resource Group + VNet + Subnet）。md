@@ -1,0 +1,198 @@
+Day 3：创建第一个 Azure 基础架构（Resource Group + VNet + Subnet）
+
+今天开始，我们从“单资源”迈向“多资源”的 Terraform 配置，
+理解资源间的依赖关系，并构建一个完整的虚拟网络环境。
+
+🎯 学习目标
+
+学会定义多个 Azure 资源（资源组、虚拟网络、子网）。
+
+理解资源之间的依赖关系（隐式依赖与显式依赖）。
+
+认识 HCL（HashiCorp Configuration Language）的可读性与结构化表达方式。
+
+掌握 Terraform 在多资源下的执行逻辑。
+
+📘 一、核心知识点：资源依赖与 HCL 语法
+🔹 Terraform 资源依赖机制
+
+Terraform 能自动推断资源之间的关系，例如：
+
+一个 azurerm_virtual_network 依赖于 azurerm_resource_group；
+
+一个 azurerm_subnet 依赖于 azurerm_virtual_network。
+
+这称为 隐式依赖（implicit dependency），
+因为 Terraform 会自动通过引用属性 (resource_group_name = azurerm_resource_group.rg.name) 识别。
+
+当引用关系不明显时，可以用 depends_on 显式声明。
+
+📗 二、创建项目文件结构
+
+继续在你的项目目录中：
+
+terraform-azure-lab/
+├── provider.tf
+├── main.tf
+└── variables.tf
+
+📙 三、定义 Azure 资源组（Resource Group）
+# main.tf
+resource "azurerm_resource_group" "rg" {
+  name     = "tf-day3-rg"
+  location = "East US"
+}
+
+
+💡 资源组是所有 Azure 资源的容器，必须先创建。
+
+📗 四、创建虚拟网络（Virtual Network）
+resource "azurerm_virtual_network" "vnet" {
+  name                = "tf-day3-vnet"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  address_space       = ["10.20.0.0/16"]
+
+  tags = {
+    environment = "dev"
+    owner       = "zhen.liang"
+  }
+}
+
+
+解释：
+
+address_space：定义虚拟网络网段。
+
+resource_group_name：引用资源组 → 隐式依赖。
+
+Terraform 会自动先创建 RG，再创建 VNet。
+
+📘 五、创建子网（Subnet）
+resource "azurerm_subnet" "subnet" {
+  name                 = "tf-day3-subnet"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.20.1.0/24"]
+}
+
+
+解释：
+
+子网必须属于一个虚拟网络；
+
+Terraform 通过 virtual_network_name 引用自动建立依赖。
+
+📘 六、变量化参数（可选优化）
+
+为了方便管理，定义变量文件 variables.tf：
+
+variable "location" {
+  type        = string
+  default     = "East US"
+  description = "Azure region"
+}
+
+variable "prefix" {
+  type        = string
+  default     = "tfday3"
+  description = "命名前缀"
+}
+
+
+修改资源命名为：
+
+resource "azurerm_resource_group" "rg" {
+  name     = "${var.prefix}-rg"
+  location = var.location
+}
+resource "azurerm_virtual_network" "vnet" {
+  name                = "${var.prefix}-vnet"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+  address_space       = ["10.20.0.0/16"]
+}
+resource "azurerm_subnet" "subnet" {
+  name                 = "${var.prefix}-subnet"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.20.1.0/24"]
+}
+
+⚙️ 七、执行与验证
+初始化项目
+terraform init
+
+生成执行计划
+terraform plan
+
+
+输出：
+
+Plan: 3 to add, 0 to change, 0 to destroy.
+
+执行部署
+terraform apply
+
+
+输入 yes 后 Terraform 会依次创建：
+1️⃣ Resource Group
+2️⃣ Virtual Network
+3️⃣ Subnet
+
+🔍 八、查看部署状态
+查看已部署资源
+terraform state list
+
+
+输出：
+
+azurerm_resource_group.rg
+azurerm_virtual_network.vnet
+azurerm_subnet.subnet
+
+查看单个资源详情
+terraform state show azurerm_virtual_network.vnet
+
+🧠 九、Terraform 的依赖分析逻辑（可视化理解）
+
+Terraform 内部会自动构建一张依赖图（DAG：Directed Acyclic Graph）：
+
+azurerm_resource_group.rg
+    └── azurerm_virtual_network.vnet
+          └── azurerm_subnet.subnet
+
+
+你可以用命令生成依赖图：
+
+terraform graph | dot -Tpng > graph.png
+
+
+然后查看 graph.png 即可看到依赖关系结构。
+
+🧩 十、销毁资源
+
+当练习完成后可执行：
+
+terraform destroy
+
+
+确认删除：
+
+Plan: 0 to add, 0 to change, 3 to destroy.
+
+✅ Day 3 成果验证清单
+验证点	是否完成
+成功运行 terraform init	✅
+terraform plan 输出 “3 to add”	✅
+成功创建资源组、虚拟网络、子网	✅
+能解释资源依赖（RG→VNet→Subnet）	✅
+成功执行 terraform destroy 清理资源	✅
+🧠 思考与扩展练习
+
+如果你在 Azure Portal 手动删除子网，执行 terraform plan 会发生什么？
+👉 Terraform 会检测到资源缺失，提示重新创建。
+
+如果修改 address_prefixes，Terraform 会提示替换（forces replacement）。
+
+可尝试添加第二个 Subnet，练习 for_each 动态创建。
